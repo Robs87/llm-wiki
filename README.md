@@ -6,7 +6,14 @@ Based on [Andrej Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/4
 
 Unlike traditional RAG (which rediscovers knowledge from scratch per query), the wiki compiles knowledge once and keeps it current. Cross-references are already there. Contradictions have already been flagged.
 
-**Version:** 2.1.0 | **License:** MIT
+**Version:** 2.1.1 | **License:** MIT
+
+## Update Summary (v2.1.1)
+
+- Webpage ingest now defaults to **image-preserving capture** without assuming `raw/assets/` is the primary store.
+- In Obsidian vaults that use **CAL (Custom Attachment Location)**, image persistence is delegated to CAL-managed attachment folders.
+- Raw markdown should be rewritten to **local wikilink-style references** instead of leaving remote image URLs behind.
+- `raw/assets/` is now documented as a **fallback**, not the default, for non-CAL environments.
 
 ## What's Inside
 

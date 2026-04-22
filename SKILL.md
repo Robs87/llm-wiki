@@ -1,7 +1,7 @@
 ---
 name: llm-wiki
 description: "Karpathy's LLM Wiki — build and maintain a persistent, interlinked markdown knowledge base. Ingest sources, query compiled knowledge, and lint for consistency."
-version: 2.1.0
+version: 2.1.1
 author: Hermes Agent
 license: MIT
 metadata:
@@ -239,6 +239,11 @@ When the user provides a source (URL, file, paste), integrate it into the wiki:
    - PDF → use `web_extract` (handles PDFs), save to `raw/papers/`
    - Pasted text → save to appropriate `raw/` subdirectory
    - Name the file descriptively: `raw/articles/karpathy-llm-wiki-2026.md`
+   - **Web pages default to image-preserving ingest, but image storage is delegated to the vault's attachment system.** In this user's Obsidian workflow, that means CAL manages the physical image files rather than `raw/assets/`.
+   - Preserve information-bearing visuals such as charts, diagrams, screenshots, and figures; skip obvious low-value decorative assets (favicons, tracking pixels, tiny UI icons).
+   - When the wiki lives inside an Obsidian vault using CAL, save fetched webpage images into the CAL-managed attachment path via the established CAL workflow/skill, then rewrite the markdown to local wikilink-style references instead of leaving remote URLs.
+   - Only use `raw/assets/` as a fallback when no CAL-style attachment manager is in play.
+   - If an image cannot be fetched because of anti-bot protection, auth walls, broken lazy-loading, or transient failures, explicitly report it; do not imply the raw capture is complete.
 
 ② **Discuss takeaways** with the user — what's interesting, what matters for
    the domain. (Skip this in automated/cron contexts — proceed directly.)
@@ -410,6 +415,8 @@ python3 "$SKILL_DIR/references/health-check.py" --json
 
 也可直接用 `execute_code` 内联调用 `run_health()` 函数获取结构化报告。
 
+> 备注：health 检查应只覆盖 wiki layer（`sources/`、`entities/`、`concepts/`、`comparisons/`、`queries/`、`overview.md`），不要把 `raw/`、`.obsidian/`、`graph/` 等目录混入；`index.md` 解析同时要支持标准 markdown 链接和 Obsidian `[[wikilinks]]`，否则会产生大量假阳性。
+
 ### 5. Graph
 
 When the user asks to build the knowledge graph, or wants to visualize wiki structure:
@@ -565,10 +572,11 @@ The wiki directory works as an Obsidian vault out of the box:
 - `[[wikilinks]]` render as clickable links
 - Graph View visualizes the knowledge network
 - YAML frontmatter powers Dataview queries
-- The `raw/assets/` folder holds images referenced via `![[image.png]]`
+- If the vault uses CAL (Custom Attachment Location), webpage images should be stored through CAL-managed attachment folders and referenced with local wikilinks; do not assume `raw/assets/` is the primary attachment store.
 
 For best results:
-- Set Obsidian's attachment folder to `raw/assets/`
+- If CAL is enabled, follow the vault's CAL attachment convention and keep image persistence under CAL control.
+- Use `raw/assets/` only for non-CAL environments or as an explicit fallback.
 - Enable "Wikilinks" in Obsidian settings (usually on by default)
 - Install Dataview plugin for queries like `TABLE tags FROM "entities" WHERE contains(tags, "company")`
 
