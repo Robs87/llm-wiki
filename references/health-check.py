@@ -23,6 +23,7 @@ Design boundary (see AGENTS.md):
   lint.py   = content quality, semantic (LLM), run every 10-15 ingests
 """
 
+import os
 import re
 import sys
 import json
@@ -44,9 +45,22 @@ def read_file(path: Path) -> str:
 
 
 def all_wiki_pages() -> list[Path]:
-    """All .md files in wiki/, excluding meta files."""
-    exclude = {"index.md", "log.md", "lint-report.md", "health-report.md"}
-    return [p for p in WIKI_DIR.rglob("*.md") if p.name not in exclude]
+    """All wiki-layer .md files, excluding raw sources, graph, hidden dirs, and meta files."""
+    exclude = {"index.md", "log.md", "lint-report.md", "health-report.md", "SCHEMA.md"}
+    allowed_roots = {"sources", "entities", "concepts", "comparisons", "queries", "overview.md"}
+    pages: list[Path] = []
+    for p in WIKI_DIR.rglob("*.md"):
+        rel = p.relative_to(WIKI_DIR)
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        if p.name in exclude:
+            continue
+        if rel.parts[0] == "overview.md":
+            pages.append(p)
+            continue
+        if rel.parts[0] in {"sources", "entities", "concepts", "comparisons", "queries"}:
+            pages.append(p)
+    return pages
 
 
 def strip_frontmatter(content: str) -> str:
@@ -80,12 +94,21 @@ def check_empty_files(pages: list[Path], threshold: int = STUB_THRESHOLD_CHARS) 
 # ── Check: Index sync ───────────────────────────────────────────────
 
 def _parse_index_links(index_content: str) -> set[str]:
-    """Extract markdown link targets from index.md.
+    """Extract page targets from index.md.
 
-    Matches patterns like: [Title](sources/slug.md)
-    Returns set of relative paths (e.g. 'sources/slug.md').
+    Supports both markdown links like [Title](sources/slug.md)
+    and Obsidian wikilinks like [[sources/slug|Title]] or [[overview|Wiki Overview]].
+    Returns normalized relative paths ending in .md.
     """
-    return set(re.findall(r'\[.*?\]\(([^)]+\.md)\)', index_content))
+    links = set(re.findall(r'\[.*?\]\(([^)]+\.md)\)', index_content))
+    for target in re.findall(r'\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]', index_content):
+        target = target.strip()
+        if not target:
+            continue
+        if not target.endswith('.md'):
+            target = f"{target}.md"
+        links.add(target)
+    return links
 
 
 def check_index_sync(pages: list[Path]) -> dict:

@@ -671,6 +671,8 @@ vault in Obsidian on your laptop/phone — changes appear within seconds.
   misleading results. Always run the health pre-flight check first.
 - **Post-ingest validation is not optional** — every ingest must end with a consistency
   check (broken links, index completeness). Skipping it silently introduces decay.
+- **WeChat articles often require browser-DOM extraction** — a direct HTTP fetch may return HTML that lacks usable `#js_content` / author / publish-time markers even though the rendered page has them. For `mp.weixin.qq.com` pages, prefer browser-based extraction for正文和图片列表, then save the rendered result into raw.
+- **Do not hardcode CAL attachment paths** — when a wiki lives inside an Obsidian vault, inspect the vault's actual CAL/plugin config before saving images. The attachment root may be `raw/assets/${noteFileName}` instead of a global `05_Attachments/...` path.
 - **Graph inference is expensive** — Pass 2 (semantic) uses LLM calls per page.
   Use `--no-infer` for frequent quick checks; full inference only when the wiki
   has changed significantly (10+ ingests since last build).
