@@ -1,7 +1,7 @@
 ---
 name: llm-wiki
 description: "Karpathy's LLM Wiki — build and maintain a persistent, interlinked markdown knowledge base. Ingest sources, query compiled knowledge, and lint for consistency."
-version: 2.1.1
+version: 2.2.0
 author: Hermes Agent
 license: MIT
 metadata:
@@ -51,7 +51,7 @@ any editor. No database, no special tooling required.
 wiki/
 ├── SCHEMA.md           # Conventions, structure rules, domain config
 ├── index.md            # Sectioned content catalog with one-line summaries
-├── log.md              # Chronological action log (append-only, rotated yearly)
+├── log.md              # Chronological action log（倒序：最新在前，超 500 条轮转）
 ├── overview.md         # Living synthesis across all sources (updated on ingest)
 ├── raw/                # Layer 1: Immutable source material
 │   ├── articles/       # Web articles, clippings
@@ -79,14 +79,14 @@ When the user has an existing wiki, **always orient yourself before doing anythi
 
 ① **Read `SCHEMA.md`** — understand the domain, conventions, and tag taxonomy.
 ② **Read `index.md`** — learn what pages exist and their summaries.
-③ **Scan recent `log.md`** — read the last 20-30 entries to understand recent activity.
+③ **Scan recent `log.md`** — read the first 20-30 entries to understand recent activity（因为 log 采用倒序，最新在前）。
 
 ```bash
 WIKI="${WIKI_PATH:-$HOME/wiki}"
 # Orientation reads at session start
 read_file "$WIKI/SCHEMA.md"
 read_file "$WIKI/index.md"
-read_file "$WIKI/log.md" offset=<last 30 lines>
+read_file "$WIKI/log.md" offset=1 limit=120
 ```
 
 Only after orientation should you ingest, query, or lint. This prevents:
@@ -218,10 +218,10 @@ a `_meta/topic-map.md` that groups pages by theme for faster navigation.
 ```markdown
 # Wiki Log
 
-> Chronological record of all wiki actions. Append-only.
+> Chronological record of all wiki actions. Newest entries first (reverse chronological).
 > Format: `## [YYYY-MM-DD] action | subject`
 > Actions: ingest, update, query, lint, create, archive, delete
-> When this file exceeds 500 entries, rotate: rename to log-YYYY.md, start fresh.
+> When this file exceeds 500 entries, keep the newest 400 in `log.md` and move older entries into `log-YYYY.md` archives.
 
 ## [YYYY-MM-DD] create | Wiki initialized
 - Domain: [domain]
@@ -269,7 +269,7 @@ When the user provides a source (URL, file, paste), integrate it into the wiki:
 ⑦ **Update navigation:**
    - Add new pages to `index.md` under the correct section, alphabetically
    - Update the "Total pages" count and "Last updated" date in index header
-   - Append to `log.md`: `## [YYYY-MM-DD] ingest | Source Title`
+   - Insert at the top of `log.md`: `## [YYYY-MM-DD] ingest | Source Title`
    - List every file created or updated in the log entry
 
 ⑧ **Post-ingest validation** — critical consistency check:
@@ -365,6 +365,47 @@ date: YYYY-MM-DD
 ## Action Items
 - [ ] ...
 ```
+
+### 1b. Long Page Split (技术长页拆分)
+
+When a wiki page exceeds ~200 lines, split it into a **navigation mother page + content volumes**.
+This is a repeatable batch operation — typically 3 pages per round, yielding ~10-12 new volumes.
+
+**触发条件：** `check_page_size(wiki_path)` 返回超 200 行的页面，按行数降序取 top 3。
+
+**流程：**
+
+① **扫描目标** — 读 `check_page_size` 输出，选最重的 3 个。不要硬拆刚过阈值的页（收益太低），优先拆 250+ 行的。
+
+② **分析章节结构** — 解析所有 `##` 二级标题，统计每个 section 的行数。
+
+③ **规划分卷** — 按 topic 亲缘性把相邻 sections 组成 2-4 个 volume。每个 volume 应有独立主题：
+   - Agent 配置类：会话启动+职责 / 工具+输出 / 工作流+协作 / 安全+异常
+   - 技术文档类：背景+部署 / 原理+踩坑 / 验证+适用 / 局限+展望
+   - 理念类：关注+价值观 / 方法+项目 / 技术栈+成长
+
+④ **写分卷文件** — 每个分卷独立存为 `sources/{原文件名} - {分卷主题}.md`：
+   - 继承母页 frontmatter（title 改为分卷全名，去掉 sources 字段）
+   - 首行加 `[[{原文件名}|← 返回导航页]]` 反链
+   - 正文为对应 sections 原文（不改动内容）
+
+⑤ **改写母页为导航页** — 原文件替换为：
+   - 保留原 frontmatter（bump updated 日期）
+   - 一行说明：`> 本页已拆分为分卷页，以下为导航索引。`
+   - 列出所有分卷的 wikilink（`- [[{分卷名}]]`）
+   - 如有实质 preamble 内容，保留到 `## 概述` 段
+
+⑥ **同步 index.md** — 在母页条目下方插入所有分卷条目（`- [[sources/{名}|{名}]]`），更新 Total pages 计数和日期。
+
+⑦ **同步 log.md** — 插入到顶部：`## [YYYY-MM-DD] split | 技术长页拆分第N轮`，列出母页行数变化和分卷名。
+
+⑧ **复检** — 运行 `find_broken_links` + `find_orphans` + `check_index_completeness`，全部归零才算完成。顺手修复历史遗留的 index 文件名不匹配。
+
+**Pitfalls：**
+- **Python heredoc 中避免 f-string 嵌套** — 在 `terminal` heredoc 里用 f-string 且字符串含大括号时极易 SyntaxError。改用字符串拼接。
+- **index.md 条目文件名必须与磁盘文件精确匹配** — 中文文件名中的空格、全角/半角差异是 index completeness 误报的头号原因。先 `ls` 确认真实文件名，再写 index。
+- **分卷数量以 3-4 个为宜** — 太少等于没拆，太多导航成本反升。
+- **不要改写正文内容** — 拆分是结构操作，不是编辑操作。原封不动搬运 section 文本。
 
 ### 2. Query
 
@@ -468,6 +509,8 @@ When the user asks to lint, health-check, or audit the wiki:
 
 **Automated checks**（可用脚本直接运行）:
 
+> **脚本适配提醒（已踩坑）**：如果 wiki 把 `sources/` 当作 wiki layer 的正式页面目录，`references/lint-scripts.py` 必须把 `sources` 纳入 `WIKI_DIRS`，且 `VALID_TYPES` 必须包含 `source`；否则 broken links / orphan / index completeness 会报大量假阳性。若页面允许直接链接根层控制页 `SCHEMA.md`、`index.md`、`log.md`、`overview.md`，lint 也必须把这些名字加入 existing set；做 orphan 检测时，还要把这些根层页面本身纳入“出链来源”，否则 index/overview 已收录的页面仍会被误报为孤儿。对于 `[[raw/articles/foo.md]]` 这类 raw 链接，要按 `base_dir/link` 的真实路径判断，不要错误拼成 `raw/raw/...`。另外，tag audit 只能读取**首个正式 YAML frontmatter**，不能把正文里二次嵌入的元数据块当成页面标签；taxonomy 提取也要只读 `SCHEMA.md` 的 `## Tag Taxonomy` 段，并正确解析带反引号的条目（如 ``- `framework` — ...``），否则会把 used tags / unlisted tags 误报得非常夸张。
+
 ① **Orphan pages** → `find_orphans(wiki_path)` — 零入链的 wiki 页面。
 
 ② **Broken wikilinks** → `find_broken_links(wiki_path)` — 指向不存在页面的
@@ -498,8 +541,8 @@ When the user asks to lint, health-check, or audit the wiki:
 ⑧ **Tag audit** → `audit_tags(wiki_path)` — 对比所有页面使用的标签 vs
    `SCHEMA.md` taxonomy，列出不在 taxonomy 中的标签及其使用位置。
 
-⑨ **Log rotation** → `check_log_rotation(wiki_path)` — log.md 超过 500 条时
-   需轮转：重命名为 `log-YYYY.md`，创建新的空 `log.md`。
+⑨ **Log rotation** → `check_log_rotation(wiki_path)` / `rotate_log(wiki_path)` — log.md 超过 500 条时
+   保留最新 400 条在 `log.md`，把更旧记录按年份归档到 `log-YYYY.md`；不要因为轮转把当前最近日志清空。
 
 **Severity grouping**（报告必须按此顺序分组）:
 1. 🔴 Broken links — 功能性错误，必须立即修复
@@ -541,7 +584,7 @@ search_files pattern=".*\\.md$" target="files" path="$WIKI"
 search_files pattern="alignment" path="$WIKI" file_glob="*.md"
 
 # Recent activity
-read_file path="$WIKI/log.md" offset=<last 20 lines>
+read_file path="$WIKI/log.md" offset=1 limit=80
 ```
 
 > **Hermes 工具说明：** `search_files` 参数是具名参数（`pattern`, `path`, `file_glob`, `target`），
@@ -663,7 +706,7 @@ vault in Obsidian on your laptop/phone — changes appear within seconds.
   200 lines. Move detailed analysis to dedicated deep-dive pages.
 - **Ask before mass-updating** — if an ingest would touch 10+ existing pages, confirm
   the scope with the user first.
-- **Rotate the log** — when log.md exceeds 500 entries, rename it `log-YYYY.md` and start fresh.
+- **Rotate the log** — when log.md exceeds 500 entries, keep the newest 400 in `log.md` and archive older entries into `log-YYYY.md` by year.
   The agent should check log size during lint.
 - **Handle contradictions explicitly** — don't silently overwrite. Note both claims with dates,
   mark in frontmatter, flag for user review.

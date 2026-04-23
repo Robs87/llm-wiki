@@ -6,14 +6,14 @@ Based on [Andrej Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/4
 
 Unlike traditional RAG (which rediscovers knowledge from scratch per query), the wiki compiles knowledge once and keeps it current. Cross-references are already there. Contradictions have already been flagged.
 
-**Version:** 2.1.1 | **License:** MIT
+**Version:** 2.2.0 | **License:** MIT
 
-## Update Summary (v2.1.1)
+## Update Summary (v2.2.0)
 
-- Webpage ingest now defaults to **image-preserving capture** without assuming `raw/assets/` is the primary store.
-- In Obsidian vaults that use **CAL (Custom Attachment Location)**, image persistence is delegated to CAL-managed attachment folders.
-- Raw markdown should be rewritten to **local wikilink-style references** instead of leaving remote image URLs behind.
-- `raw/assets/` is now documented as a **fallback**, not the default, for non-CAL environments.
+- `log.md` is now governed as a **reverse-chronological control file**: newest entries first, orientation reads the top of the file, and new entries insert at the top instead of appending to the end.
+- `references/build-graph.py` now writes graph/report log entries in **top-insert mode**, matching the live wiki convention.
+- `references/lint-scripts.py` now includes **reverse-log-aware rotation helpers**: keep the newest 400 entries in `log.md`, and archive overflow into `log-YYYY.md` by year once the file exceeds 500 entries.
+- README / SKILL docs were updated so operational guidance, templates, and lint expectations no longer assume append-only logs.
 
 ## What's Inside
 
@@ -37,7 +37,7 @@ Standalone Python tools:
 |---|---|
 | `health-check.py` | Structural health checks (empty files, index sync, log coverage) — zero LLM calls |
 | `build-graph.py` | Knowledge graph builder with NetworkX + Louvain community detection + vis.js HTML output |
-| `lint-scripts.py` | Automated lint functions (orphans, broken links, frontmatter, tags, page size) |
+| `lint-scripts.py` | Automated lint functions (orphans, broken links, frontmatter, tags, page size, reverse-log rotation check/execute) |
 
 All scripts read `WIKI_PATH` from environment (defaults to `~/Desktop/wiki`).
 

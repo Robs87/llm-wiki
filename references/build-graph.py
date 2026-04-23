@@ -1188,7 +1188,7 @@ def append_log(entry: str):
     if not log_path.exists():
         log_path.write_text(
             "# Wiki Log\n\n"
-            "> Records important additions, revisions, and clarifications in the project knowledge layer. Maintained in append-only mode for agent and human traceability.\n\n"
+            "> Records important additions, revisions, and clarifications in the project knowledge layer. Newest entries first (reverse chronological).\n\n"
             f"{entry_text}\n",
             encoding="utf-8",
         )
@@ -1198,9 +1198,20 @@ def append_log(entry: str):
     if not existing:
         existing = (
             "# Wiki Log\n\n"
-            "> Records important additions, revisions, and clarifications in the project knowledge layer. Maintained in append-only mode for agent and human traceability."
+            "> Records important additions, revisions, and clarifications in the project knowledge layer. Newest entries first (reverse chronological)."
         )
-    log_path.write_text(existing + "\n\n" + entry_text + "\n", encoding="utf-8")
+    match = re.match(r'(?s)^(.*?)(\n## \[.*)?$', existing)
+    if not match:
+        log_path.write_text(existing + "\n\n" + entry_text + "\n", encoding="utf-8")
+        return
+
+    head = (match.group(1) or "").rstrip()
+    rest = (match.group(2) or "").strip()
+    if rest:
+        new_text = head + "\n\n" + entry_text + "\n\n" + rest + "\n"
+    else:
+        new_text = head + "\n\n" + entry_text + "\n"
+    log_path.write_text(new_text, encoding="utf-8")
 
 
 def build_graph(infer: bool = True, open_browser: bool = False, clean: bool = False,

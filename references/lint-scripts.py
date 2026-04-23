@@ -20,9 +20,9 @@ from pathlib import Path
 
 # ── 配置 ──────────────────────────────────────────────
 WIKI_PATH = os.environ.get("WIKI_PATH", os.path.expanduser("~/Desktop/wiki"))
-WIKI_DIRS = ["entities", "concepts", "comparisons", "queries"]  # Layer 2 目录
+WIKI_DIRS = ["sources", "entities", "concepts", "comparisons", "queries"]  # Layer 2 / 2a 目录
 REQUIRED_FM_FIELDS = ["title", "created", "updated", "type", "tags", "sources"]
-VALID_TYPES = ["entity", "concept", "comparison", "query", "summary"]
+VALID_TYPES = ["source", "entity", "concept", "comparison", "query", "summary"]
 
 
 def get_all_md_files(base_dir, subdirs=None):
@@ -46,7 +46,14 @@ def find_orphans(base_dir=WIKI_PATH):
     all_files = get_all_md_files(base_dir)
     # 构建 wikilink → 出链源文件 的映射
     inbound = defaultdict(set)
-    for fpath in all_files:
+
+    link_source_files = list(all_files)
+    for root_name in ["index.md", "overview.md", "SCHEMA.md", "log.md"]:
+        root_path = os.path.join(base_dir, root_name)
+        if os.path.exists(root_path):
+            link_source_files.append(root_name)
+
+    for fpath in link_source_files:
         full_path = os.path.join(base_dir, fpath)
         try:
             content = open(full_path, "r", encoding="utf-8").read()
@@ -81,6 +88,12 @@ def find_broken_links(base_dir=WIKI_PATH):
         existing.add(name_no_ext)
         existing.add(basename)
 
+    # 根层控制文件也允许被 wiki 页面链接
+    for root_name in ["SCHEMA", "index", "log", "overview"]:
+        root_path = os.path.join(base_dir, f"{root_name}.md")
+        if os.path.exists(root_path):
+            existing.add(root_name)
+
     broken = []
     for fpath in all_files:
         full_path = os.path.join(base_dir, fpath)
@@ -93,7 +106,12 @@ def find_broken_links(base_dir=WIKI_PATH):
             link = link.strip()
             # 匹配：完全名 / 短名 / 短名.md
             if link not in existing and f"{link}.md" not in str(existing):
-                # 额外检查：是否是 raw/ 下的文件（raw 文件不算断链）
+                # 额外检查：raw/ 下的文件不算断链（支持 raw/articles/foo 与 raw/foo 两种写法）
+                raw_link_path = os.path.join(base_dir, link)
+                if link.startswith("raw/") and raw_link_path.endswith(".md") and os.path.exists(raw_link_path):
+                    continue
+                if link.startswith("raw/") and os.path.exists(f"{raw_link_path}.md"):
+                    continue
                 if os.path.exists(os.path.join(base_dir, "raw", f"{link}.md")):
                     continue
                 broken.append({"source": fpath, "link": link})
@@ -203,17 +221,18 @@ def audit_tags(base_dir=WIKI_PATH):
     schema_path = os.path.join(base_dir, "SCHEMA.md")
     all_files = get_all_md_files(base_dir)
 
-    # 从 SCHEMA.md 提取 taxonomy
+    # 从 SCHEMA.md 提取 taxonomy（仅限 Tag Taxonomy 段）
     taxonomy_tags = set()
     if os.path.exists(schema_path):
         try:
             content = open(schema_path, "r", encoding="utf-8").read()
-            # 匹配 `- tag-name` 格式
-            taxonomy_tags = set(re.findall(r"^\s*-\s+([\w-]+)\s*$", content, re.MULTILINE))
+            m = re.search(r"## Tag Taxonomy\n(.*?)(?:\n## |\Z)", content, re.DOTALL)
+            taxonomy_block = m.group(1) if m else ""
+            taxonomy_tags = set(re.findall(r"^\s*-\s+`?([\w-]+)`?\s*(?:—|$)", taxonomy_block, re.MULTILINE))
         except Exception:
             pass
 
-    # 收集所有页面使用的标签
+    # 收集所有页面使用的标签（只读取首个 YAML frontmatter）
     used_tags = defaultdict(list)  # tag -> [files]
     for fpath in all_files:
         full_path = os.path.join(base_dir, fpath)
@@ -221,13 +240,19 @@ def audit_tags(base_dir=WIKI_PATH):
             content = open(full_path, "r", encoding="utf-8").read()
         except Exception:
             continue
-        # 从 frontmatter 提取 tags
-        fm_match = re.search(r"^tags:\s*\[(.+?)\]", content, re.MULTILINE | re.DOTALL)
-        if fm_match:
-            tags_str = fm_match.group(1)
-            tags = re.findall(r"([\w-]+)", tags_str)
-            for tag in tags:
-                used_tags[tag].append(fpath)
+        if not content.startswith("---"):
+            continue
+        end = content.find("\n---", 3)
+        if end == -1:
+            continue
+        fm_text = content[3:end]
+        fm_match = re.search(r"^tags:\s*\[(.+?)\]", fm_text, re.MULTILINE | re.DOTALL)
+        if not fm_match:
+            continue
+        tags_str = fm_match.group(1)
+        tags = re.findall(r"([\w-]+)", tags_str)
+        for tag in tags:
+            used_tags[tag].append(fpath)
 
     # 找出不在 taxonomy 中的标签
     unlisted = {tag: files for tag, files in used_tags.items() if tag not in taxonomy_tags}
@@ -258,9 +283,33 @@ def check_page_size(base_dir=WIKI_PATH, threshold=200):
     return sorted(oversized, key=lambda x: -x["lines"])
 
 
-# ── ⑦ Log 轮转检查 ────────────────────────────────────
-def check_log_rotation(base_dir=WIKI_PATH, entry_threshold=500):
-    """检查 log.md 是否需要轮转"""
+# ── ⑦ Log 轮转检查 / 轮转执行 ───────────────────────────
+def _split_log_document(content: str):
+    """拆出日志头部与条目列表；log.md 采用倒序（最新在前）。"""
+    match = re.search(r"^##\s+\[", content, re.MULTILINE)
+    if not match:
+        return content.strip(), []
+
+    head = content[:match.start()].rstrip()
+    entries_blob = content[match.start():].strip()
+    entries = [e.strip() for e in re.split(r"(?=^##\s+\[)", entries_blob, flags=re.MULTILINE) if e.strip()]
+    return head, entries
+
+
+def _entry_year(entry: str):
+    m = re.match(r"^##\s+\[(\d{4})-\d{2}-\d{2}\]", entry)
+    return m.group(1) if m else "unknown"
+
+
+def _archive_header(year: str):
+    return (
+        f"# Wiki Log Archive ({year})\n\n"
+        "> Older entries rotated out of `log.md`. Reverse chronological within this archive.\n"
+    )
+
+
+def check_log_rotation(base_dir=WIKI_PATH, entry_threshold=500, keep_entries=400):
+    """检查倒序 log.md 是否需要轮转。超过阈值时保留最新 keep_entries 条。"""
     log_path = os.path.join(base_dir, "log.md")
     if not os.path.exists(log_path):
         return {"needs_rotation": False, "entries": 0, "reason": "log.md 不存在"}
@@ -270,14 +319,62 @@ def check_log_rotation(base_dir=WIKI_PATH, entry_threshold=500):
     except Exception:
         return {"needs_rotation": False, "entries": 0, "reason": "无法读取 log.md"}
 
-    entries = re.findall(r"^##\s+\[", content, re.MULTILINE)
-    count = len(entries)
+    _, entry_list = _split_log_document(content)
+    count = len(entry_list)
+    overflow = max(0, count - keep_entries) if count > entry_threshold else 0
+    archive_years = sorted({_entry_year(e) for e in entry_list[keep_entries:]}) if overflow else []
 
     return {
         "needs_rotation": count > entry_threshold,
         "entries": count,
         "threshold": entry_threshold,
+        "keep_entries": keep_entries,
+        "overflow_entries": overflow,
+        "archive_years": archive_years,
     }
+
+
+def rotate_log(base_dir=WIKI_PATH, entry_threshold=500, keep_entries=400):
+    """执行倒序日志轮转：保留最新 keep_entries 条，其余按年份归档到 log-YYYY.md。"""
+    status = check_log_rotation(base_dir, entry_threshold=entry_threshold, keep_entries=keep_entries)
+    if not status.get("needs_rotation"):
+        status["rotated"] = False
+        return status
+
+    log_path = Path(base_dir) / "log.md"
+    content = log_path.read_text(encoding="utf-8")
+    head, entries = _split_log_document(content)
+    keep = entries[:keep_entries]
+    overflow = entries[keep_entries:]
+
+    archive_groups = defaultdict(list)
+    for entry in overflow:
+        archive_groups[_entry_year(entry)].append(entry)
+
+    written_archives = {}
+    for year, moved_entries in archive_groups.items():
+        archive_path = Path(base_dir) / f"log-{year}.md"
+        if archive_path.exists():
+            archive_head, archive_existing = _split_log_document(archive_path.read_text(encoding="utf-8"))
+            archive_head = archive_head or _archive_header(year)
+        else:
+            archive_head = _archive_header(year)
+            archive_existing = []
+
+        archive_text = archive_head.rstrip() + "\n\n" + "\n\n".join(moved_entries + archive_existing).strip() + "\n"
+        archive_path.write_text(archive_text, encoding="utf-8")
+        written_archives[year] = len(moved_entries)
+
+    current_text = head.rstrip() + "\n\n" + "\n\n".join(keep).strip() + "\n"
+    log_path.write_text(current_text, encoding="utf-8")
+
+    status.update({
+        "rotated": True,
+        "kept_entries": len(keep),
+        "archived_entries": len(overflow),
+        "archives_written": written_archives,
+    })
+    return status
 
 
 # ── 一键运行所有检查 ──────────────────────────────────
@@ -335,9 +432,9 @@ def run_all_lint(base_dir=WIKI_PATH):
     print("\n=== ⑦ Log 轮转检查 ===")
     log_check = check_log_rotation(base_dir)
     results["log_rotation"] = log_check
-    print(f"  log.md 当前 {log_check['entries']} 条（阈值 {log_check['threshold']}）")
+    print(f"  log.md 当前 {log_check['entries']} 条（阈值 {log_check['threshold']}，保留最新 {log_check.get('keep_entries', 'n/a')} 条）")
     if log_check["needs_rotation"]:
-        print("  ⚠ 需要轮转！")
+        print(f"  ⚠ 需要轮转：预计归档 {log_check.get('overflow_entries', 0)} 条 → {', '.join(log_check.get('archive_years', []))}")
     else:
         print("  ✅ 无需轮转")
 
