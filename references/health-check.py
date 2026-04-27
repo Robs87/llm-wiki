@@ -101,8 +101,8 @@ def _parse_index_links(index_content: str) -> set[str]:
     Returns normalized relative paths ending in .md.
     """
     links = set(re.findall(r'\[.*?\]\(([^)]+\.md)\)', index_content))
-    for target in re.findall(r'\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]', index_content):
-        target = target.strip()
+    for match in re.finditer(r'\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|.*?)?\]\]', index_content):
+        target = match.group(1).strip()
         if not target:
             continue
         if not target.endswith('.md'):
@@ -155,16 +155,35 @@ def check_index_sync(pages: list[Path]) -> dict:
 
 # ── Check: Log coverage ────────────────────────────────────────────
 
+def _normalize_log_token(value: str) -> str:
+    return value.strip().lower().replace("-", " ").replace("_", " ")
+
+
 def _parse_log_entries(log_content: str) -> set[str]:
     """Extract page titles/slugs from log.md entries.
 
-    Log format: ## [YYYY-MM-DD] ingest | Title Here
-    Returns set of lowercase title strings.
+    Supports direct action headers like:
+      ## [YYYY-MM-DD] ingest | Title Here
+      ## [YYYY-MM-DD] create | Title Here
+      ## [YYYY-MM-DD] update | Title Here
+
+    Also supports bulk backfill bullets like:
+      - sources/foo-bar.md
+
+    Returns normalized lowercase title / slug strings.
     """
-    return set(
-        m.group(1).strip().lower()
-        for m in re.finditer(r'^## \[\d{4}-\d{2}-\d{2}\] ingest \| (.+)$', log_content, re.MULTILINE)
-    )
+    tokens: set[str] = set()
+
+    for m in re.finditer(r'^## \[\d{4}-\d{2}-\d{2}\] (?:ingest|create|update) \| (.+)$', log_content, re.MULTILINE):
+        tokens.add(_normalize_log_token(m.group(1)))
+
+    for m in re.finditer(r'^-\s+(sources/[^\n]+?\.md)\s*$', log_content, re.MULTILINE):
+        rel_path = m.group(1).strip().lower()
+        tokens.add(rel_path)
+        stem = Path(rel_path).stem
+        tokens.add(_normalize_log_token(stem))
+
+    return tokens
 
 
 def check_log_coverage(pages: list[Path]) -> list[dict]:

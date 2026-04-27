@@ -68,9 +68,14 @@ wiki/
     └── graph.html      # Interactive vis.js visualization
 ```
 
-**Layer 1 — Raw Sources:** Immutable. The agent reads but never modifies these.
+**Layer 1 — Raw Sources:** Faithful, immutable copies of original material. This layer is
+equivalent to web clipping — preserve the original text and images exactly as-is.
+**Do NOT summarize, analyze, or restructure content at this layer.** All summarization
+and analysis belongs in Layer 2 (sources/, entities/, etc.). The agent reads but never
+modifies files in raw/.
 **Layer 2 — The Wiki:** Agent-owned markdown files. Created, updated, and
-cross-referenced by the agent.
+cross-referenced by the agent. This is where summarization, analysis, and
+cross-referencing happen (sources/, entities/, concepts/, comparisons/, queries/).
 **Layer 3 — The Schema:** `SCHEMA.md` defines structure, conventions, and tag taxonomy.
 
 ## Resuming an Existing Wiki (CRITICAL — do this every session)
@@ -126,7 +131,7 @@ Adapt to the user's domain. The schema constrains agent behavior and ensures con
 - Use `[[wikilinks]]` to link between pages (minimum 2 outbound links per page)
 - When updating a page, always bump the `updated` date
 - Every new page must be added to `index.md` under the correct section
-- Every action must be appended to `log.md`
+- Every action must be recorded in `log.md` with newest entries inserted at the top
 
 ## Frontmatter
   ```yaml
@@ -234,16 +239,26 @@ a `_meta/topic-map.md` that groups pages by theme for faster navigation.
 
 When the user provides a source (URL, file, paste), integrate it into the wiki:
 
-① **Capture the raw source:**
-   - URL → use `web_extract` to get markdown, save to `raw/articles/`
+① **Capture the raw source (faithful archive — no summarization):**
+   - **This step is equivalent to web clipping.** Save the original text and images exactly
+     as they appear. Do NOT add summaries, key takeaways, or analysis at this layer.
+   - URL → use `web_extract` to get markdown; for anti-scraping sites (e.g. `mp.weixin.qq.com`),
+     use `browser_navigate` to extract content and image URLs via JS.
    - PDF → use `web_extract` (handles PDFs), save to `raw/papers/`
    - Pasted text → save to appropriate `raw/` subdirectory
-   - Name the file descriptively: `raw/articles/karpathy-llm-wiki-2026.md`
-   - **Web pages default to image-preserving ingest, but image storage is delegated to the vault's attachment system.** In this user's Obsidian workflow, that means CAL manages the physical image files rather than `raw/assets/`.
-   - Preserve information-bearing visuals such as charts, diagrams, screenshots, and figures; skip obvious low-value decorative assets (favicons, tracking pixels, tiny UI icons).
-   - When the wiki lives inside an Obsidian vault using CAL, save fetched webpage images into the CAL-managed attachment path via the established CAL workflow/skill, then rewrite the markdown to local wikilink-style references instead of leaving remote URLs.
-   - Only use `raw/assets/` as a fallback when no CAL-style attachment manager is in play.
-   - If an image cannot be fetched because of anti-bot protection, auth walls, broken lazy-loading, or transient failures, explicitly report it; do not imply the raw capture is complete.
+   - Name the file descriptively: `raw/articles/YYYY-MM-DD-title.md`
+   - **Image handling — exactly one rule depending on vault setup:**
+     - **CAL vault** (Obsidian with Custom Attachment Location): Download images to
+       `raw/assets/${noteFileName}/` (noteFileName = raw md filename without `.md`).
+       Rewrite references to `![](../assets/${noteFileName}/image.jpg)`.
+     - **Non-CAL vault**: Download images to `raw/articles/<filename>_assets/` and
+       rewrite to relative paths. **Never** create `_assets/` inside a CAL vault.
+   - For WeChat articles, images use `data-src` lazy-loading — extract real URLs via
+     browser JS (`document.querySelectorAll('img[data-src]')`) before downloading.
+   - Preserve information-bearing visuals (charts, diagrams, screenshots, figures);
+     skip low-value decorative assets (favicons, tracking pixels, tiny UI icons).
+   - If an image cannot be fetched (anti-bot, auth wall, broken lazy-loading), explicitly
+     report it; do not imply the raw capture is complete.
 
 ② **Discuss takeaways** with the user — what's interesting, what matters for
    the domain. (Skip this in automated/cron contexts — proceed directly.)
@@ -251,6 +266,13 @@ When the user provides a source (URL, file, paste), integrate it into the wiki:
 ③ **Check what already exists** — search index.md and use `search_files` to find
    existing pages for mentioned entities/concepts. This is the difference between
    a growing wiki and a pile of duplicates.
+   - If a closely related page exists but the new source covers a *different angle or
+     sub-topic*, create a new page with a distinguishing title and cross-link from
+     the existing page.
+   - If a page simply needs updating (new facts, same topic), update the existing page.
+
+④ **Plan wiki page changes** — based on ③'s findings, list which pages to create,
+   update, or skip. For large ingests (10+ page changes), confirm scope with user first.
 
 ⑤ **Write or update wiki pages:**
    - **Create source summary page:** Write `sources/<slug>.md` using the Source Page
@@ -443,7 +465,7 @@ When the user asks for a health check, or at the start of a new wiki session:
 **检查项：**
 1. **Empty / stub files** — 正文不足 100 字符的页面（可能是 rate-limit 损坏）
 2. **Index sync** — `index.md` 条目 vs 文件系统实际文件
-3. **Log coverage** — source 页面是否有对应的 ingest log 条目
+③ **Log coverage** — source 页面是否有对应的 log 条目。注意：历史补录不一定是逐页 `## ... ingest | 标题`；也可能是批量 backfill（例如一个 `update` 条目下面列出 `- sources/foo.md` 清单）。health-check / 自定义检查在做 log coverage 时，必须同时识别：① 逐条 `ingest|create|update` 标题；② 批量 backfill 中列出的 `sources/*.md` 路径。否则会把已补录的历史来源页继续误报为缺失覆盖。
 
 **执行方式：**
 
@@ -456,7 +478,7 @@ python3 "$SKILL_DIR/references/health-check.py" --json
 
 也可直接用 `execute_code` 内联调用 `run_health()` 函数获取结构化报告。
 
-> 备注：health 检查应只覆盖 wiki layer（`sources/`、`entities/`、`concepts/`、`comparisons/`、`queries/`、`overview.md`），不要把 `raw/`、`.obsidian/`、`graph/` 等目录混入；`index.md` 解析同时要支持标准 markdown 链接和 Obsidian `[[wikilinks]]`，否则会产生大量假阳性。
+> 备注：health 检查应只覆盖 wiki layer（`sources/`、`entities/`、`concepts/`、`comparisons/`、`queries/`、`overview.md`），不要把 `raw/`、`.obsidian/`、`graph/` 等目录混入；`index.md` 解析同时要支持标准 markdown 链接和 Obsidian `[[wikilinks]]`，否则会产生大量假阳性。解析 `[[target|alias]]` 时不能假设 alias 内不含 `]`：像 `([美] 作者)` 这类常见中文别名会让简单正则提前截断，导致 index_sync 误报。实现上优先用 `re.finditer(r'\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|.*?)?\]\]')` 这类“抓 target、别名非贪婪吃到 `]]`”的写法，而不是 `(?:\|[^\]]+)?`。
 
 ### 5. Graph
 
@@ -552,22 +574,28 @@ When the user asks to lint, health-check, or audit the wiki:
 
 **Graph-aware checks**（需要 `graph/graph.json` 存在时才运行）:
 
-⑫ **Phantom hubs** — 被 2+ 页面的 `[[wikilink]]` 引用但页面本身不存在的名称。
+⑩ **Phantom hubs** — 被 2+ 页面的 `[[wikilink]]` 引用但页面本身不存在的名称。
    这是强烈的新页面创建信号，按引用数降序排列。
 
-⑬ **Hub stubs** — God nodes（degree > μ+2σ）但正文不足 500 字符。
+⑪ **Hub stubs** — God nodes（degree > μ+2σ）但正文不足 500 字符。
    高连接度但内容单薄 — 需要充实。
 
-⑭ **Fragile bridges** — 社区间仅 1 条边连接。删除任一端就断联。
+⑫ **Fragile bridges** — 社区间仅 1 条边连接。删除任一端就断联。
 
-⑮ **Sparse pages** — 出链少于 2 条的 wiki 页面（链接密度不足）。
+⑬ **Sparse pages** — 出链少于 2 条的 wiki 页面（链接密度不足）。
 
-⑯ **Data gaps** — Wiki 无法回答的领域问题，建议补充的源文件。
+⑭ **Data gaps** — Wiki 无法回答的领域问题，建议补充的源文件。
 
-⑩ **Report findings** with specific file paths and suggested actions, grouped
+⑮ **Report findings** with specific file paths and suggested actions, grouped
     by severity above.
 
-⑪ **Append to log.md:** `## [YYYY-MM-DD] lint | N issues found`
+⑯ **Fix issues** — resolve in severity order (🔴 → 🟠 → 🟡 → 🟢).
+
+⑰ **Re-verify after repair** — re-run `find_broken_links` + `find_orphans` +
+    `check_index_completeness` to confirm no new issues were introduced.
+    If new issues appear, repeat from ⑮ until clean.
+
+⑱ **Append to log.md:** `## [YYYY-MM-DD] lint | N issues found, M fixed`
 
 ## Working with the Wiki
 
@@ -615,11 +643,10 @@ The wiki directory works as an Obsidian vault out of the box:
 - `[[wikilinks]]` render as clickable links
 - Graph View visualizes the knowledge network
 - YAML frontmatter powers Dataview queries
-- If the vault uses CAL (Custom Attachment Location), webpage images should be stored through CAL-managed attachment folders and referenced with local wikilinks; do not assume `raw/assets/` is the primary attachment store.
+- Image paths follow the rules in ingest ① (CAL vs non-CAL vault) — no separate
+  rules here; that section is the single source of truth.
 
 For best results:
-- If CAL is enabled, follow the vault's CAL attachment convention and keep image persistence under CAL control.
-- Use `raw/assets/` only for non-CAL environments or as an explicit fallback.
 - Enable "Wikilinks" in Obsidian settings (usually on by default)
 - Install Dataview plugin for queries like `TABLE tags FROM "entities" WHERE contains(tags, "company")`
 
@@ -714,8 +741,12 @@ vault in Obsidian on your laptop/phone — changes appear within seconds.
   misleading results. Always run the health pre-flight check first.
 - **Post-ingest validation is not optional** — every ingest must end with a consistency
   check (broken links, index completeness). Skipping it silently introduces decay.
-- **WeChat articles often require browser-DOM extraction** — a direct HTTP fetch may return HTML that lacks usable `#js_content` / author / publish-time markers even though the rendered page has them. For `mp.weixin.qq.com` pages, prefer browser-based extraction for正文和图片列表, then save the rendered result into raw.
+- **WeChat articles require browser-based extraction** — a direct HTTP fetch may return HTML that lacks usable `#js_content` / author / publish-time markers even though the rendered page has them. For `mp.weixin.qq.com` pages: (1) use `browser_navigate` to load the page, (2) extract images via `document.querySelectorAll('img[data-src]')` because WeChat uses lazy-loading (`data-src` holds the real URL, `src` is empty), (3) download images per the vault's image rule (see ingest ① — CAL or non-CAL), (4) rewrite the raw markdown with local image references. Do NOT save a text-only raw file — raw must include images.
 - **Do not hardcode CAL attachment paths** — when a wiki lives inside an Obsidian vault, inspect the vault's actual CAL/plugin config before saving images. The attachment root may be `raw/assets/${noteFileName}` instead of a global `05_Attachments/...` path.
+- **Image path single source of truth** — ingest ① defines the only image handling rules. Obsidian Integration and Pitfalls sections reference it, not duplicate it.
+- **Source-page images use Markdown image syntax** — for source/source-like wiki pages, embed local images with relative Markdown paths such as `![](../raw/assets/...)`, not Obsidian `![[...]]`, to avoid render/lint inconsistencies across tooling.
+- **Raw diary ingest is usually partial update, not bulk create** — before ingesting `raw/diary/` or another date-note folder, first map raw filenames/dates against existing `sources/` pages. Many diary files may already be ingested under renamed source titles. Do a coverage check first, then ingest only the missing raw files; otherwise you create duplicates and inflate `index.md` / `log.md` for no gain.
+- **Lint may treat image wikilinks to `raw/assets/` as broken links** — if a source page embeds images stored under `raw/assets/...`, prefer standard markdown image links with a correct relative path like `![](../raw/assets/foo/bar.png)` rather than `![[raw/assets/foo/bar.png]]` unless your lint/build pipeline explicitly whitelists image wikilinks.
 - **Graph inference is expensive** — Pass 2 (semantic) uses LLM calls per page.
   Use `--no-infer` for frequent quick checks; full inference only when the wiki
   has changed significantly (10+ ingests since last build).
