@@ -45,14 +45,18 @@ WIKI="${WIKI_PATH:-$HOME/wiki}"
 The wiki is just a directory of markdown files — open it in Obsidian, VS Code, or
 any editor. No database, no special tooling required.
 
-## Architecture: Three Layers
+## Architecture: Three Layers + Human Control Layer
 
 ```
 wiki/
 ├── SCHEMA.md           # Conventions, structure rules, domain config
 ├── index.md            # Sectioned content catalog with one-line summaries
 ├── log.md              # Chronological action log（倒序：最新在前，超 500 条轮转）
-├── overview.md         # Living synthesis across all sources (updated on ingest)
+├── overview.md         # Living synthesis / current human-facing big picture
+├── maps.md             # Human control: topic/concept map and core hubs
+├── questions.md        # Human control: long-term recurring questions
+├── principles.md       # Human control: reusable judgment principles
+├── decisions.md        # Human control: decisions made with wiki support
 ├── raw/                # Layer 1: Immutable source material
 │   ├── articles/       # Web articles, clippings
 │   ├── papers/         # PDFs, arxiv papers
@@ -67,6 +71,18 @@ wiki/
     ├── graph.json      # Node/edge data (SHA256-cached)
     └── graph.html      # Interactive vis.js visualization
 ```
+
+**Human Control Layer — Human-owned synthesis:** For large wikis, do not expect the
+human to know every LLM-compiled page. Keep five stable entry pages the human can
+actually master: `overview.md` (current big picture), `maps.md` (topic/concept map),
+`questions.md` (long-term questions), `principles.md` (reusable judgment rules), and
+`decisions.md` (choices made using the wiki). Also maintain `queries/inbox.md` as a
+candidate-question inbox. Every ingest/query/organizing pass should run a return-flow
+gate: update `overview` if the overall picture changed; `maps` if topic structure
+changed; `questions` if a recurring/open question surfaced; `principles` if a reusable
+judgment emerged; `decisions` if the wiki supported an action/choice; otherwise write
+`Human layer: no update` or the reason in `log.md`. This is what keeps LLM-compiled
+knowledge from becoming merely "the LLM's knowledge."
 
 **Layer 1 — Raw Sources:** Faithful, immutable copies of original material. This layer is
 equivalent to web clipping — preserve the original text and images exactly as-is.
@@ -235,6 +251,15 @@ a `_meta/topic-map.md` that groups pages by theme for faster navigation.
 
 ## Core Operations
 
+### Human Control Layer initialization
+
+When an existing wiki is already large or the user worries the wiki is becoming "LLM-owned",
+initialize the Human Control Layer before doing more bulk ingest: create/update `maps.md`,
+`questions.md`, `principles.md`, `decisions.md`, and `queries/inbox.md`; add them near the top
+of `index.md`; add a `SCHEMA.md` rule requiring the return-flow gate after each ingest/query;
+and log the change. Use `templates/human-control-layer.md` as the starter. Keep this layer
+small and human-masterable — do not turn it into another compiled encyclopedia.
+
 ### 1. Ingest
 
 When the user provides a source (URL, file, paste), integrate it into the wiki:
@@ -285,21 +310,29 @@ When the user provides a source (URL, file, paste), integrate it into the wiki:
      pages via `[[wikilinks]]`. Check that existing pages link back.
    - **Tags:** Only use tags from the taxonomy in SCHEMA.md
 
-⑥ **Update overview.md** — revise the living synthesis if the new source
+⑥ **Run Human Control Layer return-flow gate** — decide whether this ingest changes any human-owned entry page:
+   - Overall understanding changed → update `overview.md`
+   - New topic cluster or changed topic structure → update `maps.md`
+   - Recurring/open question surfaced → update `questions.md` or `queries/inbox.md`
+   - Reusable judgment rule emerged → update `principles.md`
+   - Source supports an actual action/choice → update `decisions.md`
+   - If none apply, record `Human layer: no update` or a short reason in `log.md`
+
+⑦ **Update overview.md** — revise the living synthesis if the new source
    changes the overall picture (new themes, shifted conclusions, etc.).
 
-⑦ **Update navigation:**
+⑧ **Update navigation:**
    - Add new pages to `index.md` under the correct section, alphabetically
    - Update the "Total pages" count and "Last updated" date in index header
    - Insert at the top of `log.md`: `## [YYYY-MM-DD] ingest | Source Title`
    - List every file created or updated in the log entry
 
-⑧ **Post-ingest validation** — critical consistency check:
+⑨ **Post-ingest validation** — critical consistency check:
    - Verify all new `[[wikilinks]]` point to existing pages (run broken link check)
    - Verify all new pages appear in `index.md`
    - Print a change summary: files created, files updated, links added
 
-⑨ **Report what changed** — list every file created or updated to the user.
+⑩ **Report what changed** — list every file created or updated to the user.
 
 A single source can trigger updates across 5-15 wiki pages. This is normal
 and desired — it's the compounding effect.
@@ -439,10 +472,18 @@ When the user asks a question about the wiki's domain:
 ③ **Read the relevant pages** using `read_file`.
 ④ **Synthesize an answer** from the compiled knowledge. Cite the wiki pages
    you drew from: "Based on [[page-a]] and [[page-b]]..."
-⑥ **File valuable answers back** — if the answer is a substantial comparison,
-   deep dive, or novel synthesis, create a page in `queries/` or `comparisons/`.
-   Don't file trivial lookups — only answers that would be painful to re-derive.
-⑦ **Update log.md** with the query and whether it was filed.
+⑥ **File valuable answers back** — do not rely on the user to copy/paste valuable
+   fragments. If a question meets at least 2 value criteria (recurs, changes judgment,
+   connects multiple themes, will be reused, exposes a gap, or produces a principle),
+   append it to `queries/inbox.md` with the value rationale and suggested destination.
+   If it meets 3+ criteria or would be painful to re-derive, propose or create a formal
+   `queries/` or `comparisons/` page as appropriate. The inbox is a candidate pool, not
+   final knowledge: AI captures candidates; the human calibrates/promotes them.
+⑦ **Run Human Control Layer return-flow gate** — update `overview.md`, `maps.md`,
+   `questions.md`, `principles.md`, or `decisions.md` when the answer changes the big
+   picture, topic map, long-term questions, reusable principles, or concrete choices.
+⑧ **Update log.md** with the query, whether it was filed/promoted, and the human-layer
+   outcome (`Human layer: updated ...` or `Human layer: no update`).
 
 ### 4. Health (Pre-Flight Check)
 
@@ -752,5 +793,7 @@ vault in Obsidian on your laptop/phone — changes appear within seconds.
   has changed significantly (10+ ingests since last build).
 - **Phantom hubs are action items, not errors** — when 3+ pages reference `[[Topic]]`
   but no page exists, that's the wiki telling you what to create next.
-- **Overview.md is a living document** — update it on every ingest, not just when
-  explicitly asked. A stale overview defeats the purpose of having one.
+- **Overview.md is a living document, not a forced dump** — run the Human Control Layer
+  return-flow gate on every ingest/query. Update `overview.md` only when the overall picture
+  changes; otherwise record `Human layer: no update` or the short reason in `log.md`. A stale
+  overview defeats the purpose, but noisy forced updates make the human layer unreadable.

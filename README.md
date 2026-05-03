@@ -8,12 +8,13 @@ Unlike traditional RAG (which rediscovers knowledge from scratch per query), the
 
 **Version:** 2.2.0 | **License:** MIT
 
-## Update Summary (v2.2.0)
+## Update Summary (Human Control Layer)
 
-- `log.md` is now governed as a **reverse-chronological control file**: newest entries first, orientation reads the top of the file, and new entries insert at the top instead of appending to the end.
-- `references/build-graph.py` now writes graph/report log entries in **top-insert mode**, matching the live wiki convention.
-- `references/lint-scripts.py` now includes **reverse-log-aware rotation helpers**: keep the newest 400 entries in `log.md`, and archive overflow into `log-YYYY.md` by year once the file exceeds 500 entries.
-- README / SKILL docs were updated so operational guidance, templates, and lint expectations no longer assume append-only logs.
+- Added a **Human Control Layer** for large LLM-compiled wikis: `overview.md`, `maps.md`, `questions.md`, `principles.md`, `decisions.md`, plus `queries/inbox.md` for candidate questions.
+- Added a mandatory **return-flow gate** after ingest/query/organizing: update the relevant human-owned entry page only when the big picture, topic map, long-term questions, principles, or concrete decisions change; otherwise record `Human layer: no update` in `log.md`.
+- Clarified that `overview.md` is a living synthesis, **not a forced dump**: update it only when the overall picture changes, to keep the human layer readable and actually ownable.
+- Added query-value governance: AI captures candidate questions when they meet value criteria; the human calibrates/promotes them instead of letting the LLM decide final knowledge automatically.
+- Preserved existing operational improvements: reverse-chronological `log.md`, source-vs-raw separation, health/lint helpers, graph tooling, and post-ingest validation.
 
 ## What's Inside
 
@@ -21,13 +22,13 @@ Unlike traditional RAG (which rediscovers knowledge from scratch per query), the
 
 The core behavioral specification for the agent. Covers:
 
-- **Directory structure** — three-layer architecture (`raw/` → `wiki/` → `SCHEMA.md`)
-- **Ingest workflow** — 9-step process with post-ingest validation and domain-specific templates (diary, meeting notes)
-- **Query workflow** — synthesize answers from compiled knowledge with citations
+- **Directory structure** — three-layer architecture plus Human Control Layer
+- **Ingest workflow** — raw faithful capture, wiki compilation, return-flow gate, post-ingest validation, and domain-specific templates (diary, meeting notes)
+- **Query workflow** — synthesize answers from compiled knowledge with citations, capture valuable questions into `queries/inbox.md`, and update human-owned pages when judgment changes
 - **Health check** — zero-LLM pre-flight structural integrity check
 - **Knowledge graph** — two-pass build (deterministic wikilinks + semantic inference) with vis.js visualization
-- **Lint** — 16 automated checks including graph-aware analysis (phantom hubs, hub stubs, fragile bridges)
-- **Governance** — tag taxonomy, contradiction policy, archive/rotation lifecycle
+- **Lint** — automated checks including graph-aware analysis (phantom hubs, hub stubs, fragile bridges)
+- **Governance** — Human Control Layer, tag taxonomy, contradiction policy, archive/rotation lifecycle
 
 ### references/
 
