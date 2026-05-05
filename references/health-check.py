@@ -41,25 +41,32 @@ STUB_THRESHOLD_CHARS = 100
 
 
 def read_file(path: Path) -> str:
-    return path.read_text(encoding="utf-8") if path.exists() else ""
+    try:
+        return path.read_text(encoding="utf-8") if path.is_file() else ""
+    except (OSError, IOError):
+        return ""
+
+
+HCL_ROOT_FILES = {"overview.md", "maps.md", "questions.md", "principles.md", "decisions.md"}
 
 
 def all_wiki_pages() -> list[Path]:
     """All wiki-layer .md files, excluding raw sources, graph, hidden dirs, and meta files."""
-    exclude = {"index.md", "log.md", "lint-report.md", "health-report.md", "SCHEMA.md"}
-    allowed_roots = {"sources", "entities", "concepts", "comparisons", "queries", "overview.md"}
+    skip_roots = {"raw", "assets", "graph", ".obsidian", ".git", ".claude"}
+    exclude = {"index.md", "log.md", "lint-report.md", "health-report.md", "SCHEMA.md",
+               "graph-report.md"}
     pages: list[Path] = []
     for p in WIKI_DIR.rglob("*.md"):
+        if not p.is_file():
+            continue
         rel = p.relative_to(WIKI_DIR)
         if any(part.startswith(".") for part in rel.parts):
             continue
+        if rel.parts[0] in skip_roots:
+            continue
         if p.name in exclude:
             continue
-        if rel.parts[0] == "overview.md":
-            pages.append(p)
-            continue
-        if rel.parts[0] in {"sources", "entities", "concepts", "comparisons", "queries"}:
-            pages.append(p)
+        pages.append(p)
     return pages
 
 
@@ -124,9 +131,9 @@ def check_index_sync(pages: list[Path]) -> dict:
     index_links = _parse_index_links(index_content)
 
     # Normalize index links to absolute paths for comparison
-    # overview.md is listed under ## Overview, not in the per-type sections.
-    # Exclude it from both sides to avoid false positives.
-    meta_pages = {"overview.md"}
+    # HCL root pages are listed under their own section, not in per-type sections.
+    # Exclude them from both sides to avoid false positives.
+    meta_pages = HCL_ROOT_FILES
 
     index_paths = set()
     for link in index_links:

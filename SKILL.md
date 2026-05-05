@@ -765,9 +765,10 @@ vault in Obsidian on your laptop/phone — changes appear within seconds.
   reconstruction draft is possible, and get the user's approval before writing anything.
 - **Don't create pages for passing mentions** — follow the Page Thresholds in SCHEMA.md. A name
   appearing once in a footnote doesn't warrant an entity page.
-- **Don't create pages without cross-references** — isolated pages are invisible. Every page must
+    - **Don't create pages without cross-references** — isolated pages are invisible. Every page must
   link to at least 2 other pages.
-- **Frontmatter is required** — it enables search, filtering, and staleness detection.
+- **Graph/lint scripts must ignore non-page markdown-like paths** — `raw/`, `raw/assets/`, `graph/`, hidden dirs, and directories whose names end in `.md` are not wiki pages. Use `Path.is_file()` before reading and whitelist wiki-layer roots. HCL root pages (`overview`, `maps`, `questions`, `principles`, `decisions`) are valid link/index targets.
+
 - **Tags must come from the taxonomy** — freeform tags decay into noise. Add new tags to SCHEMA.md
   first, then use them.
 - **Keep pages scannable** — a wiki page should be readable in 30 seconds. Split pages over

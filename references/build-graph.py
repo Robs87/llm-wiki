@@ -67,7 +67,10 @@ EDGE_COLORS = {
 
 
 def read_file(path: Path) -> str:
-    return path.read_text(encoding="utf-8") if path.exists() else ""
+    try:
+        return path.read_text(encoding="utf-8") if path.is_file() else ""
+    except (OSError, IOError):
+        return ""
 
 
 def call_llm(prompt: str, model_env: str, default_model: str, max_tokens: int = 4096) -> str:
@@ -97,12 +100,29 @@ def sha256(text: str) -> str:
 
 
 def all_wiki_pages() -> list[Path]:
-    return [p for p in WIKI_DIR.rglob("*.md")
-            if p.name not in ("index.md", "log.md", "lint-report.md")]
+    skip_roots = {"raw", "assets", "graph", ".obsidian", ".git", ".claude"}
+    skip_names = {"index.md", "log.md", "lint-report.md", "health-report.md",
+                  "SCHEMA.md", "graph-report.md"}
+    pages = []
+    for p in WIKI_DIR.rglob("*.md"):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(WIKI_DIR)
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        if rel.parts[0] in skip_roots:
+            continue
+        if p.name in skip_names:
+            continue
+        pages.append(p)
+    return pages
 
 
 def extract_wikilinks(content: str) -> list[str]:
-    return list(set(re.findall(r'\[\[([^\]]+)\]\]', content)))
+    # Strip code blocks (```) and inline code (`...`) to avoid false positives
+    stripped = re.sub(r'```[\s\S]*?```', '', content)
+    stripped = re.sub(r'`[^`]*`', '', stripped)
+    return list(set(re.findall(r'\[\[([^\]]+)\]\]', stripped)))
 
 
 def extract_frontmatter_type(content: str) -> str:
@@ -427,6 +447,9 @@ def find_phantom_hubs(pages: list[Path], min_refs: int = 2) -> list[dict]:
         links = extract_wikilinks(content)
         src = page_id(p)
         for link in links:
+            # Skip raw/ and assets/ references — they are not wiki pages
+            if link.startswith("raw/") or link.startswith("assets/"):
+                continue
             if link.lower() not in existing_stems:
                 refs.setdefault(link, set()).add(src)
 

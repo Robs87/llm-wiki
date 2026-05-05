@@ -23,6 +23,21 @@ WIKI_PATH = os.environ.get("WIKI_PATH", os.path.expanduser("~/Desktop/wiki"))
 WIKI_DIRS = ["sources", "entities", "concepts", "comparisons", "queries"]  # Layer 2 / 2a 目录
 REQUIRED_FM_FIELDS = ["title", "created", "updated", "type", "tags", "sources"]
 VALID_TYPES = ["source", "entity", "concept", "comparison", "query", "summary"]
+HCL_ROOT_NAMES = ["overview", "maps", "questions", "principles", "decisions"]
+
+
+def _strip_code_blocks(content: str) -> str:
+    """Remove fenced code blocks and inline code so example wikilinks aren't parsed."""
+    stripped = re.sub(r'```[\s\S]*?```', '', content)
+    stripped = re.sub(r'`[^`]*`', '', stripped)
+    return stripped
+
+
+def _is_asset_link(link: str) -> bool:
+    """Return True if the link points to raw/, assets/ or an image file."""
+    if link.startswith("raw/") or link.startswith("assets/"):
+        return True
+    return bool(re.search(r'\.(png|jpe?g|gif|svg|webp|mp4|pdf|webm)$', link, re.IGNORECASE))
 
 
 def get_all_md_files(base_dir, subdirs=None):
@@ -52,6 +67,10 @@ def find_orphans(base_dir=WIKI_PATH):
         root_path = os.path.join(base_dir, root_name)
         if os.path.exists(root_path):
             link_source_files.append(root_name)
+    for hcl in HCL_ROOT_NAMES:
+        hcl_path = os.path.join(base_dir, f"{hcl}.md")
+        if os.path.exists(hcl_path) and f"{hcl}.md" not in link_source_files:
+            link_source_files.append(f"{hcl}.md")
 
     for fpath in link_source_files:
         full_path = os.path.join(base_dir, fpath)
@@ -59,10 +78,11 @@ def find_orphans(base_dir=WIKI_PATH):
             content = open(full_path, "r", encoding="utf-8").read()
         except Exception:
             continue
-        # 匹配 [[link]] 格式
-        links = re.findall(r"\[\[([^\]|]+)", content)
+        links = re.findall(r"\[\[([^\]|]+)", _strip_code_blocks(content))
         for link in links:
             link = link.strip()
+            if _is_asset_link(link):
+                continue
             inbound[link].add(fpath)
 
     orphans = []
@@ -89,7 +109,7 @@ def find_broken_links(base_dir=WIKI_PATH):
         existing.add(basename)
 
     # 根层控制文件也允许被 wiki 页面链接
-    for root_name in ["SCHEMA", "index", "log", "overview"]:
+    for root_name in ["SCHEMA", "index", "log", "overview"] + HCL_ROOT_NAMES:
         root_path = os.path.join(base_dir, f"{root_name}.md")
         if os.path.exists(root_path):
             existing.add(root_name)
@@ -101,12 +121,15 @@ def find_broken_links(base_dir=WIKI_PATH):
             content = open(full_path, "r", encoding="utf-8").read()
         except Exception:
             continue
-        links = re.findall(r"\[\[([^\]|]+)", content)
+        links = re.findall(r"\[\[([^\]|]+)", _strip_code_blocks(content))
         for link in links:
             link = link.strip()
+            # 跳过 raw/assets 目录或图片链接
+            if _is_asset_link(link):
+                continue
             # 匹配：完全名 / 短名 / 短名.md
             if link not in existing and f"{link}.md" not in str(existing):
-                # 额外检查：raw/ 下的文件不算断链（支持 raw/articles/foo 与 raw/foo 两种写法）
+                # 额外检查：raw/ 下的文件不算断链
                 raw_link_path = os.path.join(base_dir, link)
                 if link.startswith("raw/") and raw_link_path.endswith(".md") and os.path.exists(raw_link_path):
                     continue
@@ -153,9 +176,12 @@ def check_index_completeness(base_dir=WIKI_PATH):
             missing_from_index.append(fpath)
 
     # 提取 index 中所有 [[wikilink]]，检查是否指向存在的文件
-    index_links = re.findall(r"\[\[([^\]|]+)", content)
+    index_links = re.findall(r"\[\[([^\]|]+)", _strip_code_blocks(content))
     for link in index_links:
         link = link.strip()
+        # HCL 根层页面是合法目标
+        if link in HCL_ROOT_NAMES:
+            continue
         # 检查 link 是否对应某个存在的 .md 文件
         found = False
         for fpath in file_set:
