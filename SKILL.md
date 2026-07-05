@@ -34,6 +34,8 @@ Use this skill when the user:
 
 ## Wiki Location
 
+**User-specific hard scope:** this skill operates only on the wiki repository selected by `WIKI_PATH`. For this profile, the intended wiki is `/Users/rainbow/Desktop/wiki` (the LLM Wiki repo). It is **not** the user's PARA/Obsidian vault (`/Users/rainbow/Desktop/claudesidian`).
+
 **Location:** Set via `WIKI_PATH` environment variable (e.g. in `~/.hermes/.env`).
 
 If unset, defaults to `~/wiki`.
@@ -41,6 +43,8 @@ If unset, defaults to `~/wiki`.
 ```bash
 WIKI="${WIKI_PATH:-$HOME/wiki}"
 ```
+
+Before every ingest/query/lint, resolve and print/verify `WIKI`. If it is not the intended wiki repository, stop and ask instead of guessing.
 
 The wiki is just a directory of markdown files — open it in Obsidian, VS Code, or
 any editor. No database, no special tooling required.
@@ -93,6 +97,16 @@ modifies files in raw/.
 cross-referenced by the agent. This is where summarization, analysis, and
 cross-referencing happen (sources/, entities/, concepts/, comparisons/, queries/).
 **Layer 3 — The Schema:** `SCHEMA.md` defines structure, conventions, and tag taxonomy.
+
+## Scope Guard (CRITICAL — prevent cross-vault contamination)
+
+First-principles rule: a wiki operation has two independent objects: **the wiki repository to update** and **the source material to ingest**. Do not collapse them.
+
+- The wiki repository is always `WIKI="${WIKI_PATH:-$HOME/wiki}"`.
+- "最近的笔记 / recent notes" means recent note/source files **inside the wiki repository** (e.g. `raw/`, `sources/`, `queries/`) unless the user explicitly names another source path.
+- Never scan or read `/Users/rainbow/Desktop/claudesidian` merely because it is an Obsidian/PARA vault or because it contains files called notes.
+- Only read `/Users/rainbow/Desktop/claudesidian` when the user explicitly provides that path or says to ingest from the Obsidian/PARA vault.
+- If the requested source is ambiguous, ask one clarification question before reading outside `WIKI`.
 
 ## Resuming an Existing Wiki (CRITICAL — do this every session)
 
